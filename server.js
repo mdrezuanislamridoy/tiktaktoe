@@ -14,14 +14,21 @@ app.get("/", (req, res) => {
 
 let players = {};
 let board = Array(9).fill(""); // Initialize the game board
+let currentPlayer = null; // Track the current player
 
 io.on("connection", (socket) => {
   console.log("A user connected");
 
   // Assign player type (X or O)
   if (Object.keys(players).length < 2) {
-    players[socket.id] = Object.keys(players).length === 0 ? "O" : "X";
+    players[socket.id] = Object.keys(players).length === 0 ? "X" : "O";
     socket.emit("playerType", players[socket.id]);
+
+    // Set the first player as the current player
+    if (Object.keys(players).length === 1) {
+      currentPlayer = socket.id;
+      socket.emit("yourTurn"); // Notify the first player it's their turn
+    }
   } else {
     socket.emit("message", "Game is full. Please wait.");
     socket.disconnect();
@@ -29,10 +36,18 @@ io.on("connection", (socket) => {
 
   // Listen for moves
   socket.on("move", (index) => {
-    if (board[index] === "") {
+    if (board[index] === "" && socket.id === currentPlayer) {
       board[index] = players[socket.id]; // Update the board with the player's move
       io.emit("moveMade", { index, player: players[socket.id] });
       checkWinner(); // Check for a winner after each move
+
+      // Switch to the next player
+      currentPlayer = Object.keys(players).find(
+        (id) => players[id] !== players[socket.id]
+      );
+      if (currentPlayer) {
+        io.to(currentPlayer).emit("yourTurn"); // Notify the next player it's their turn
+      }
     }
   });
 
@@ -40,12 +55,26 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => {
     console.log("A user disconnected");
     delete players[socket.id];
+    if (currentPlayer === socket.id) {
+      currentPlayer = Object.keys(players).length
+        ? Object.keys(players)[0]
+        : null; // Switch current player if necessary
+      if (currentPlayer) {
+        io.to(currentPlayer).emit("yourTurn"); // Notify remaining players of the new current player
+      }
+    }
   });
 
   // Reset the game
   socket.on("reset", () => {
     board = Array(9).fill("");
+    currentPlayer = Object.keys(players).length
+      ? Object.keys(players)[0]
+      : null; // Reset current player
     io.emit("reset");
+    if (currentPlayer) {
+      io.to(currentPlayer).emit("yourTurn"); // Notify the first player it's their turn
+    }
   });
 });
 
